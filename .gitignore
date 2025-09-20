@@ -1,0 +1,5 @@
+.env
+resources/files/
+target/
+.idea/
+*.iml

@@ -27,12 +27,13 @@
                  [org.xerial/sqlite-jdbc "3.46.0.0"]
 
                  ;Authentication
-                 [com.clerk/backend-api "3.1.0"]
+                 [com.clerk/backend-api "3.2.0"]
 
                  ;Payments
                  [com.stripe/stripe-java "29.4.0"]
 
-
+                 ;Environment variables
+                 [environ "1.2.0"]
 
                  ]
   :repl-options {:init-ns tabblioserver.core})

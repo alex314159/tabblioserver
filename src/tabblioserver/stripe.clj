@@ -2,14 +2,15 @@
   (:require [clojure.tools.logging :as log]
             [cheshire.core :as cs]
             [next.jdbc.sql :as sql]
-            [tabblioserver.sql :as db])
+            [tabblioserver.sql :as db]
+            [environ.core :refer [env]])
   (:import [com.stripe Stripe]
            [com.stripe.model Customer PaymentIntent Subscription Event EventDataObjectDeserializer]
            [com.stripe.param CustomerCreateParams PaymentIntentCreateParams SubscriptionCreateParams]
            [com.stripe.exception StripeException]))
 
-(def stripe-secret-key (System/getenv "STRIPE_SECRET_KEY"))
-(def stripe-webhook-secret (System/getenv "STRIPE_WEBHOOK_SECRET"))
+(def stripe-secret-key (env :stripe-secret-key))
+(def stripe-webhook-secret (env :stripe-webhook-secret))
 
 (defn init-stripe! []
   (when stripe-secret-key

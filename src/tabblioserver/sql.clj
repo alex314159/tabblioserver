@@ -26,6 +26,16 @@
 (defn create-tables! []
   (log/info "Creating database tables")
   (let [ds (get-datasource)]
+    ;; Create users table
+    (jdbc/execute! ds
+      ["CREATE TABLE IF NOT EXISTS users (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          clerk_id TEXT NOT NULL UNIQUE,
+          creation_datetime DATETIME DEFAULT CURRENT_TIMESTAMP,
+          last_login_datetime DATETIME,
+          number_of_logins INTEGER DEFAULT 0
+        )"])
+
     ;; Create templates table
     (jdbc/execute! ds
       ["CREATE TABLE IF NOT EXISTS templates (
@@ -40,6 +50,11 @@
           opened_count INTEGER DEFAULT 0
         )"])
     
+    ;; Create indexes for users
+    (jdbc/execute! ds ["CREATE INDEX IF NOT EXISTS idx_users_clerk_id ON users(clerk_id)"])
+    (jdbc/execute! ds ["CREATE INDEX IF NOT EXISTS idx_users_creation_datetime ON users(creation_datetime)"])
+    (jdbc/execute! ds ["CREATE INDEX IF NOT EXISTS idx_users_last_login_datetime ON users(last_login_datetime)"])
+
     ;; Create indexes
     (jdbc/execute! ds ["CREATE INDEX IF NOT EXISTS idx_templates_username ON templates(username)"])
     (jdbc/execute! ds ["CREATE INDEX IF NOT EXISTS idx_templates_created_at ON templates(created_at)"])
@@ -127,3 +142,36 @@
       (-> template
           (update :templates/template cs/parse-string true)
           (dissoc :templates/id)))))
+
+(defn create-user [clerk-id]
+  (let [ds (get-datasource)]
+    (log/info "Creating user with clerk-id:" clerk-id)
+    (try
+      (let [result (sql/insert! ds :users {:clerk_id clerk-id})]
+        (-> result first :users/id))
+      (catch Exception e
+        (if (re-find #"UNIQUE constraint failed" (.getMessage e))
+          (do
+            (log/info "User with clerk-id already exists:" clerk-id)
+            (-> (sql/find-by-keys ds :users {:clerk_id clerk-id})
+                first
+                :users/id))
+          (throw e))))))
+
+(defn get-user-by-clerk-id [clerk-id]
+  (let [ds (get-datasource)]
+    (sql/find-by-keys ds :users {:clerk_id clerk-id})))
+
+(defn update-user-login [clerk-id]
+  (let [ds (get-datasource)]
+    (log/info "Updating login for user:" clerk-id)
+    (jdbc/execute! ds
+      ["UPDATE users SET
+          last_login_datetime = CURRENT_TIMESTAMP,
+          number_of_logins = number_of_logins + 1
+        WHERE clerk_id = ?" clerk-id])))
+
+(defn delete-user [clerk-id]
+  (let [ds (get-datasource)]
+    (log/info "Deleting user with clerk-id:" clerk-id)
+    (sql/delete! ds :users {:clerk_id clerk-id})))
