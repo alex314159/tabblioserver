@@ -5,13 +5,13 @@
             [tabblioserver.sql :as sql]
             [environ.core :refer [env]])
   (:import [com.clerk.backend_api Clerk]
-           [com.clerk.backend_api.models.operations VerifyTokenRequest]
-           [com.clerk.backend_api.models.shared Security]
+    [com.clerk.backend_api.models.operations VerifyM2MTokenRequestBody]
+    ;[com.clerk.backend_api.models.shared Security]
            [com.clerk.backend_api.models.errors ClerkErrors]
-           [javax.crypto.Mac]
-           [javax.crypto.spec.SecretKeySpec]
-           [java.security.MessageDigest]
-           [java.util.Base64]))
+           [javax.crypto Mac]
+           [javax.crypto.spec SecretKeySpec]
+           [java.security MessageDigest]
+           [java.util Base64]))
 
 (def ^:private clerk-secret-key (env :clerk-secret-key))
 (def ^:private clerk-webhook-secret (env :clerk-webhook-secret))
@@ -21,9 +21,7 @@
     (when clerk-secret-key
       (log/info "Initializing Clerk client")
       (-> (Clerk/builder)
-          (.security (Security/builder)
-                    (.bearerAuth clerk-secret-key)
-                    (.build))
+          (.bearerAuth clerk-secret-key)
           (.build)))
     (when-not clerk-secret-key
       (log/warn "CLERK_SECRET_KEY environment variable not set"))))
@@ -38,7 +36,7 @@
 (defn verify-session-token [token]
   (try
     (when (and @clerk-client token)
-      (let [request (-> (VerifyTokenRequest/builder)
+      (let [request (-> (VerifyM2MTokenRequestBody/builder)
                        (.token token)
                        (.build))
             response (.verifyToken @clerk-client request)]
