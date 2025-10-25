@@ -27,11 +27,25 @@
 (defonce datasource (atom nil))
 
 (defn init-db! []
-  (when-not @datasource
-    (log/info "Initializing database connection pool")
-    (reset! datasource (hikari/make-datasource db-config))
-    ;(create-tables!)
-    ))
+  (when @datasource
+    (try
+      (.close @datasource)  ; Close old one first
+      (catch Exception e
+        (log/warn "Error closing existing datasource" e))))
+  (log/info "Initializing database connection pool")
+  (reset! datasource (hikari/make-datasource db-config)))
+
+(defn close-db! []
+  (when @datasource
+    (.close @datasource)
+    (reset! datasource nil)))
+
+;(defn init-db! []
+;  (when-not @datasource
+;    (log/info "Initializing database connection pool")
+;    (reset! datasource (hikari/make-datasource db-config))
+;    ;(create-tables!)
+;    ))
 
 (defn get-datasource []
   (when-not @datasource (init-db!))
@@ -58,6 +72,7 @@
           username TEXT,
           nickname TEXT,
           template TEXT NOT NULL,
+           content_hash INTEGER,  -- Add this
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
           modified_at DATETIME DEFAULT CURRENT_TIMESTAMP,
           last_opened_at DATETIME,
@@ -73,7 +88,7 @@
     (jdbc/execute! ds ["CREATE INDEX IF NOT EXISTS idx_templates_username ON templates(username)"])
     (jdbc/execute! ds ["CREATE INDEX IF NOT EXISTS idx_templates_created_at ON templates(created_at)"])
     (jdbc/execute! ds ["CREATE INDEX IF NOT EXISTS idx_templates_modified_at ON templates(modified_at)"])
-
+    (jdbc/execute! ds ["CREATE INDEX IF NOT EXISTS idx_templates_content_hash ON templates(content_hash)"])
     ;; Create trigger for modified_at
     (jdbc/execute! ds
       ["CREATE TRIGGER IF NOT EXISTS update_templates_modified_at
@@ -131,31 +146,47 @@
         END"])))
 
 (defn save-template [template-data]
-  (with-open [ds (get-datasource)]
-    (let [uuid (:uuid template-data)
+  (with-open [conn (jdbc/get-connection (get-datasource))]
+    (let [uuid (:tabblio/uuid template-data)
           username (:username template-data)
           nickname (:nickname template-data)
-          template-json (cs/generate-string (:template template-data))]
+          template-json (pr-str template-data)
+          content-hash (hash (dissoc template-data :tabblio/uuid :tabblio/last-saved-at))]
       (log/info "Saving template for user:" username)
-      (try (sql/insert! ds :templates
-                        {:uuid     uuid
-                         :username username
-                         :nickname nickname
-                         :template template-json})
-           {:result "Success" :uuid uuid}
-           (catch Exception e
-             {:result "Failure" :uuid uuid})))))
+      ;; Check if template with same hash already exists
+      (if-let [existing (first (sql/find-by-keys conn :templates {:content_hash content-hash} {:builder-fn rs/as-unqualified-maps}))]
+        (do
+          (log/info "Duplicate template detected, skipping insert")
+          {:result "Duplicate" :uuid uuid :existing-uuid (:uuid existing)})
+        (try
+          (sql/insert! conn :templates
+                       {:uuid         uuid
+                        :username     username
+                        :nickname     nickname
+                        :template     template-json
+                        :content_hash content-hash})
+          {:result "Success" :uuid uuid}
+          (catch Exception e
+            (log/error "Error saving template:" e)
+            {:result "Failure" :uuid uuid :error (.getMessage e)}))))))
+
+;(jdbc/execute! (get-datasource)
+;               ["ALTER TABLE templates ADD COLUMN content_hash INTEGER"])
+;
+;;; Add the index
+;(jdbc/execute! (get-datasource)
+;               ["CREATE INDEX IF NOT EXISTS idx_templates_content_hash ON templates(content_hash)"])
+
 
 (defn load-template [uuid]
-  (with-open [ds (get-datasource)]
+  (with-open [conn (jdbc/get-connection (get-datasource))]
     (log/info "Loading template with id:" uuid)
-    (when-let [template (sql/get-by-id ds :templates uuid :uuid {:builder-fn rs/as-unqualified-maps})]
-      (sql/update! ds :templates {:last_opened_at "CURRENT_TIMESTAMP"
-                                  :opened_count   (inc (:templates/opened_count template))}
+    (when-let [template (sql/get-by-id conn :templates uuid :uuid {:builder-fn rs/as-unqualified-maps})]
+      (sql/update! conn :templates {:last_opened_at "CURRENT_TIMESTAMP"
+                                  :opened_count   (inc (:opened_count template))}
                    {:uuid uuid})
-      (-> template
-          (update :template cs/parse-string true)
-          (dissoc :id)))))
+      (-> (:template template)
+          identity))))
 
 (defn create-user [clerk-id]
   (let [ds (get-datasource)]

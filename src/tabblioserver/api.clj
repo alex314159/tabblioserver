@@ -1,6 +1,7 @@
 (ns tabblioserver.api
   (:require [reitit.ring :as ring]
             [ring.middleware.json :refer [wrap-json-body wrap-json-response]]
+            [ring.middleware.params :refer [wrap-params]]
             [ring.middleware.cors :refer [wrap-cors]]
             [ring.util.response :refer [response status]]
             [ring.util.io :as io]
@@ -35,15 +36,15 @@
 (defn save-template [request]
   (reset! last-request request)
   (let [                                                    ;user (:user request)
-        template-data (cheshire.core/parse-string (:body request) true)
+        template-data (clojure.edn/read-string (:body request))
         ;user-id (:user-id user)
         user-id nil
         enhanced-data (assoc template-data :username (or user-id "") :nickname "")]
-    (sql/save-template enhanced-data)
-    (response {:success true :uuid (:uuid template-data)})))
+    (response (sql/save-template enhanced-data))))
 
 (defn load-template [request]
-  (let [template-id (get-in request [:body :uuid])
+  (reset! last-request request)
+  (let [template-id (get-in request [:query-params "uuid"])
         template-data (sql/load-template template-id)]
     (if template-data
       (response template-data)
@@ -142,7 +143,7 @@
 (def routes
   [["/" {:get {:handler (fn [_] (response {:message "TabblioServer API"}))}}]
    ["/api/save-template" {:post {:handler save-template }}] ;(require-auth save-template) THAT IS IF I WANT CLERK
-   ["/api/load-template" {:post {:handler load-template}}]
+   ["/api/load-template" {:get {:handler load-template}}]
    ;["/create-payment-intent" {:post {:handler (require-auth create-payment-intent)}}]
    ;["/create-subscription" {:post {:handler (require-auth create-subscription)}}]
    ["/api/files/:file-id" {:get {:handler serve-file}}]
@@ -165,5 +166,6 @@
                               :access-control-allow-credentials true
                               )
                   clerk/wrap-clerk-auth
+                  wrap-params
                   wrap-json-body
                   wrap-json-response]}))
