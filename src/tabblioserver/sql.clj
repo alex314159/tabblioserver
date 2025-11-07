@@ -79,6 +79,15 @@
           opened_count INTEGER DEFAULT 0
         )"])
 
+    (jdbc/execute! ds
+                   ["CREATE TABLE IF NOT EXISTS user_templates (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          uuid TEXT NOT NULL,
+          username TEXT NOT NULL,
+          nickname TEXT,
+          linked_at DATETIME DEFAULT CURRENT_TIMESTAMP
+          )"])
+
     ;; Create indexes for users
     (jdbc/execute! ds ["CREATE INDEX IF NOT EXISTS idx_users_clerk_id ON users(clerk_id)"])
     (jdbc/execute! ds ["CREATE INDEX IF NOT EXISTS idx_users_creation_datetime ON users(creation_datetime)"])
@@ -178,13 +187,12 @@
 ;               ["CREATE INDEX IF NOT EXISTS idx_templates_content_hash ON templates(content_hash)"])
 
 
-(defn load-template [uuid]
+(defn load-template
+  [uuid]
   (with-open [conn (jdbc/get-connection (get-datasource))]
     (log/info "Loading template with id:" uuid)
     (when-let [template (sql/get-by-id conn :templates uuid :uuid {:builder-fn rs/as-unqualified-maps})]
-      (sql/update! conn :templates {:last_opened_at "CURRENT_TIMESTAMP"
-                                  :opened_count   (inc (:opened_count template))}
-                   {:uuid uuid})
+      (sql/update! conn :templates {:last_opened_at "CURRENT_TIMESTAMP" :opened_count   (inc (:opened_count template))} {:uuid uuid})
       (-> (:template template)
           identity))))
 
@@ -220,3 +228,80 @@
   (let [ds (get-datasource)]
     (log/info "Deleting user with clerk-id:" clerk-id)
     (sql/delete! ds :users {:clerk_id clerk-id})))
+
+(defn link-template [user-id uuid nickname]
+  (let [ds (get-datasource)]
+    (log/info "Linking template" uuid "to user:" user-id)
+    (try
+      (sql/insert! ds :user_templates
+                   {:uuid     uuid
+                    :username user-id
+                    :nickname (or nickname "")})
+      {:result "Success" :uuid uuid :user-id user-id}
+      (catch Exception e
+        (log/error "Error linking template:" e)
+        {:result "Failure" :uuid uuid :error (.getMessage e)}))))
+
+(defn unlink-template [user-id uuid]
+  (let [ds (get-datasource)]
+    (log/info "Unlinking template" uuid "from user:" user-id)
+    (try
+      (let [deleted (sql/delete! ds :user_templates {:uuid uuid :username user-id})]
+        (if (pos? (first deleted))
+          {:result "Success" :uuid uuid :user-id user-id}
+          {:result "Not Found" :uuid uuid :user-id user-id}))
+      (catch Exception e
+        (log/error "Error unlinking template:" e)
+        {:result "Failure" :uuid uuid :error (.getMessage e)}))))
+
+
+;; From Claude front end
+;Your backend should handle both cases:
+;
+;// Make middleware optional - check auth but don't require it
+;const optionalAuth = (req, res, next) => {
+;                                          const token = req.headers.authorization?.replace('Bearer ', '')
+;
+;                                                                                            if (token) {
+;                                                                                                        // Verify token and attach user info
+;                                                                                                        try {
+;                                                                                                             const verified = await clerkClient.verifyToken(token)
+;                                                                                                             req.userId = verified.sub  // User is authenticated
+;                                                                                                             } catch (err) {
+;                                                                                                                            // Invalid token - treat as anonymous
+;                                                                                                                            req.userId = null
+;                                                                                                                            }
+;                                                                                                        } else {
+;                                                                                                                // No token - anonymous user
+;                                                                                                                req.userId = null
+;                                                                                                                }
+;
+;                                                                                            next()
+;                                          }
+;
+;// Save template - works for both authenticated and anonymous
+;app.post('/api/save-template', optionalAuth, async (req, res) => {
+;                                                                  const template = req.body
+;                                                                  const userId = req.userId  // null if anonymous, user ID if authenticated
+;
+;                                                                  // Save template
+;                                                                  const savedTemplate = await db.templates.create({
+;                                                                                                                   data: template,
+;                                                                                                                   userId: userId,  // null for anonymous, user ID for authenticated
+;                                                                                                                   uuid: generateUUID()
+;                                                                                                                   })
+;
+;                                                                  res.json({ uuid: savedTemplate.uuid })
+;                                                                  })
+;
+;Feature Differences:
+;
+;You can add features for authenticated users:
+;
+;// Load user's saved templates
+;app.get('/api/my-templates', requireAuth, async (req, res) => {
+;                                                               const templates = await db.templates.findMany({
+;                                                                                                              where: { userId: req.userId }
+;                                                                                                              })
+;                                                               res.json({ templates })
+;                                                               })

@@ -51,6 +51,31 @@
       (-> (response {:error "Template not found"})
           (status 404)))))
 
+(defn link-template [request]
+  (if-let [user (:user request)]
+    (let [user-id (:user-id user)
+          body (:body request)
+          uuid (:uuid body)
+          nickname (:nickname body)]
+      (if uuid
+        (response (sql/link-template user-id uuid nickname))
+        (-> (response {:error "UUID is required"})
+            (status 400))))
+    (-> (response {:error "User needs to be logged in to link templates to their account"})
+        (status 401))))
+
+(defn unlink-template [request]
+  (if-let [user (:user request)]
+    (let [user-id (:user-id user)
+          body (:body request)
+          uuid (:uuid body)]
+      (if uuid
+        (response (sql/unlink-template user-id uuid))
+        (-> (response {:error "UUID is required"})
+            (status 400))))
+    (-> (response {:error "User needs to be logged in to unlink templates from their account"})
+        (status 401))))
+
 ;(defn create-payment-intent [request]
 ;  (let [user (:user request)
 ;        body (:body request)
@@ -116,9 +141,11 @@
 (defn get-content-type [file-extension]
   (case (clojure.string/lower-case file-extension)
     "csv" "text/csv"
+    "tsv" "text/tab-separated-values"
     "txt" "text/plain"
     "xls" "application/vnd.ms-excel"
     "xlsx" "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    "xlsm" "application/vnd.ms-excel.sheet.macroEnabled.12"
     "pdf" "application/pdf"
     "json" "application/json"
     "xml" "application/xml"
@@ -140,13 +167,80 @@
       (-> (response {:error "Authentication required"})
           (status 401)))))
 
+(def allowed-file-extensions #{"txt" "csv" "tsv" "xls" "xlsx" "xlsm"})
+(def max-file-size (* 10 1024 1024)) ; 10MB in bytes
+
+(defn get-file-extension-from-url [url]
+  (when url
+    (let [path (-> url
+                   (clojure.string/split #"\?")
+                   first)
+          filename (last (clojure.string/split path #"/"))
+          extension (last (clojure.string/split filename #"\."))]
+      (clojure.string/lower-case extension))))
+
+(defn serve-url [request]
+  (let [url-string (or (get-in request [:query-params "url"])
+                       (get-in request [:body :url]))]
+    (if-not url-string
+      (-> (response {:error "URL parameter is required"})
+          (status 400))
+      (try
+        ;; First, check file extension from URL
+        (let [file-extension (get-file-extension-from-url url-string)
+              uri (java.net.URI. url-string)
+              url (.toURL uri)]
+          (if-not (allowed-file-extensions file-extension)
+            (-> (response {:error (str "File type not allowed. Allowed types: " (clojure.string/join ", " allowed-file-extensions))})
+                (status 400))
+            ;; Make HEAD request to check Content-Length
+            (let [connection (doto (.openConnection url)
+                              (.setRequestMethod "HEAD")
+                              (.setConnectTimeout 5000)
+                              (.setReadTimeout 5000)
+                              (.connect))
+                  content-length (.getContentLengthLong connection)]
+
+              (if (and (pos? content-length) (> content-length max-file-size))
+                (-> (response {:error (str "File too large. Maximum size is 10MB, file is " (/ content-length 1024 1024) "MB")})
+                    (status 400))
+                ;; Download and stream the file
+                (let [input-stream (.getInputStream (.openConnection url))
+                      filename (or (last (clojure.string/split url-string #"/")) "download")]
+                  (-> (response input-stream)
+                      (assoc-in [:headers "Content-Type"] (get-content-type file-extension))
+                      (assoc-in [:headers "Content-Disposition"] (str "attachment; filename=\"" filename "\""))))))))
+        (catch java.net.URISyntaxException e
+          (log/error "Invalid URL syntax:" e)
+          (-> (response {:error "Invalid URL"})
+              (status 400)))
+        (catch java.net.MalformedURLException e
+          (log/error "Malformed URL:" e)
+          (-> (response {:error "Invalid URL"})
+              (status 400)))
+        (catch java.net.UnknownHostException e
+          (log/error "Unknown host:" e)
+          (-> (response {:error "Unable to reach the specified URL"})
+              (status 400)))
+        (catch java.io.IOException e
+          (log/error "IO error downloading file:" e)
+          (-> (response {:error "Error downloading file"})
+              (status 500)))
+        (catch Exception e
+          (log/error "Error serving URL:" e)
+          (-> (response {:error "An error occurred while processing the request"})
+              (status 500)))))))
+
 (def routes
   [["/" {:get {:handler (fn [_] (response {:message "TabblioServer API"}))}}]
    ["/api/save-template" {:post {:handler save-template }}] ;(require-auth save-template) THAT IS IF I WANT CLERK
    ["/api/load-template" {:get {:handler load-template}}]
+   ["/api/link-template" {:post {:handler link-template}}]
+   ["/api/unlink-template" {:post {:handler unlink-template}}]
    ;["/create-payment-intent" {:post {:handler (require-auth create-payment-intent)}}]
    ;["/create-subscription" {:post {:handler (require-auth create-subscription)}}]
    ["/api/files/:file-id" {:get {:handler serve-file}}]
+   ["/api/serve-url" {:get {:handler serve-url}}]
    ;["/stripe-webhook" {:post {:handler stripe-webhook}}]
    ["/api/clerk-webhook" {:post {:handler clerk-webhook}}]])
 
