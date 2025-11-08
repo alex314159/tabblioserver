@@ -31,9 +31,7 @@
 
                  ;Payments
                  [com.stripe/stripe-java "29.4.0"]
-
-                 ;Environment variables
-                 [environ "1.2.0"]
-
                  ]
+  :plugins [
+            ]
   :repl-options {:init-ns tabblioserver.core})

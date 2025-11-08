@@ -4,9 +4,8 @@
             [next.jdbc.result-set :as rs]
             [next.jdbc.sql :as sql]
             [clojure.tools.logging :as log]
-            [cheshire.core :as cs]))
-
-(def linode-local-sqlite-path "///home/aalmosni/tabblio/tabblio.db")
+            [cheshire.core :as cs]
+            [tabblioserver.env :refer [env]]))
 
 (def db-config
   {:auto-commit            true
@@ -19,7 +18,7 @@
    :maximum-pool-size      5        ; Lower for SQLite (single file)
    :pool-name              "clibtrader-sqlite-pool"
    :adapter                "sqlite"
-   :url                    (str "jdbc:sqlite:" linode-local-sqlite-path)
+   :url                    (or (env :database-url) "jdbc:sqlite:tabblio.db")
    :register-mbeans        false
    ;; SQLite-specific optimizations
    :connection-init-sql    "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA cache_size=10000; PRAGMA temp_store=memory;"})
@@ -253,6 +252,17 @@
       (catch Exception e
         (log/error "Error unlinking template:" e)
         {:result "Failure" :uuid uuid :error (.getMessage e)}))))
+
+(defn get-user-templates [user-id]
+  (let [ds (get-datasource)]
+    (log/info "Getting templates for user:" user-id)
+    (try
+      (jdbc/execute! ds
+                     ["SELECT uuid, nickname, linked_at FROM user_templates WHERE username = ?" user-id]
+                     {:builder-fn rs/as-unqualified-maps})
+      (catch Exception e
+        (log/error "Error getting user templates:" e)
+        []))))
 
 
 ;; From Claude front end

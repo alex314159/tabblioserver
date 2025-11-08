@@ -3,71 +3,79 @@
             [clojure.string :as str]
             [cheshire.core :as json]
             [tabblioserver.sql :as sql]
-            [environ.core :refer [env]])
+            [tabblioserver.env :refer [env]])
   (:import [com.clerk.backend_api Clerk]
-    [com.clerk.backend_api.models.operations VerifyM2MTokenRequestBody]
-    ;[com.clerk.backend_api.models.shared Security]
-           [com.clerk.backend_api.models.errors ClerkErrors]
+           [com.clerk.backend_api.helpers.security AuthenticateRequest]
+           [com.clerk.backend_api.helpers.security.models AuthenticateRequestOptions]
            [javax.crypto Mac]
            [javax.crypto.spec SecretKeySpec]
            [java.security MessageDigest]
-           [java.util Base64]))
+           [java.util ArrayList Base64 HashMap]
+           [java.net.http HttpRequest HttpRequest$BodyPublishers]
+           [java.net URI]))
 
 (def ^:private clerk-secret-key (env :clerk-secret-key))
 (def ^:private clerk-webhook-secret (env :clerk-webhook-secret))
 
 (defonce ^:private clerk-client
   (delay
-    (when clerk-secret-key
-      (log/info "Initializing Clerk client")
-      (-> (Clerk/builder)
-          (.bearerAuth clerk-secret-key)
-          (.build)))
-    (when-not clerk-secret-key
-      (log/warn "CLERK_SECRET_KEY environment variable not set"))))
+    (if clerk-secret-key
+      (do
+        (log/info "Initializing Clerk client")
+        (-> (Clerk/builder)
+            (.bearerAuth clerk-secret-key)
+            (.build)))
+      (do
+        (log/warn "CLERK_SECRET_KEY environment variable not set")
+        nil))))
 
-(defn extract-bearer-token [authorization-header]
-  (when authorization-header
-    (let [parts (str/split authorization-header #" ")]
-      (when (and (= 2 (count parts))
-                 (= "Bearer" (first parts)))
-        (second parts)))))
+(defn ring-headers-to-java-map [ring-headers]
+  "Convert Ring headers map to Java Map<String, List<String>>"
+  (let [java-map (HashMap.)]
+    (doseq [[header-name header-value] ring-headers]
+      (.put java-map header-name (ArrayList. [header-value])))
+    java-map))
 
-(defn verify-session-token [token]
+(defn authenticate-request [ring-req]
   (try
-    (when (and @clerk-client token)
-      (let [request (-> (VerifyM2MTokenRequestBody/builder)
-                       (.token token)
+    (when clerk-secret-key
+      (log/info "Authenticating request with Clerk...")
+      (let [headers-map (ring-headers-to-java-map (:headers ring-req))
+            origin (get-in ring-req [:headers "origin"])
+            options (-> (AuthenticateRequestOptions/secretKey clerk-secret-key)
+                       (.authorizedParty origin)
                        (.build))
-            response (.verifyToken @clerk-client request)]
-        (when (= 200 (.statusCode response))
-          (let [verification (.verifyTokenResponse response)]
-            {:valid? true
-             :user-id (.userId (.claims verification))
-             :session-id (.sessionId (.claims verification))
-             :claims (.claims verification)}))))
+            request-state (AuthenticateRequest/authenticateRequest headers-map options)]
+        (log/info "Request signed in:" (.isSignedIn request-state))
+        (if (.isSignedIn request-state)
+          (let [claims-optional (.claims request-state)]
+            (if (.isPresent claims-optional)
+              (let [claims (.get claims-optional)
+                    user-id (.getSubject claims)
+                    session-id (.get claims "sid" String)]
+                (log/info "Authentication successful, user-id:" user-id "session-id:" session-id)
+                {:user-id user-id
+                 :session-id session-id})
+              (do
+                (log/warn "Claims not present in request state")
+                nil)))
+          (do
+            (log/warn "Authentication failed, reason:" (.reason request-state))
+            nil))))
     (catch Exception e
-      (log/error e "Failed to verify Clerk session token")
-      {:valid? false :error (.getMessage e)})))
-
-(defn get-user-from-token [token]
-  (let [verification (verify-session-token token)]
-    (when (:valid? verification)
-      {:user-id (:user-id verification)
-       :session-id (:session-id verification)})))
+      (log/error e "Failed to authenticate request with Clerk")
+      (log/error "Exception class:" (class e))
+      (log/error "Exception message:" (.getMessage e))
+      nil)))
 
 (defn wrap-clerk-auth [handler]
   (fn [request]
-    (let [auth-header (get-in request [:headers "authorization"])
-          token (extract-bearer-token auth-header)]
-      (if token
-        (let [user-info (get-user-from-token token)]
-          (if user-info
-            (do
-              ;; Update user login when they make authenticated requests
-              (sql/update-user-login (:user-id user-info))
-              (handler (assoc request :user user-info)))
-            (handler (assoc request :user nil))))
+    (let [user-info (authenticate-request request)]
+      (if user-info
+        (do
+          ;; Update user login when they make authenticated requests
+          (sql/update-user-login (:user-id user-info))
+          (handler (assoc request :user user-info)))
         (handler (assoc request :user nil))))))
 
 (defn- hmac-sha256 [secret message]
