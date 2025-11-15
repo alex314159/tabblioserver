@@ -1,0 +1,16 @@
+<configuration>
+    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- Set root logger level to INFO to hide DEBUG messages -->
+    <root level="INFO">
+        <appender-ref ref="STDOUT" />
+    </root>
+
+    <!-- You can set specific loggers to different levels if needed -->
+    <!-- Example: <logger name="tabblioserver" level="INFO"/> -->
+    <!-- Example: <logger name="com.zaxxer.hikari" level="WARN"/> -->
+</configuration>
