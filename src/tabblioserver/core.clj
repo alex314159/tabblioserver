@@ -2,8 +2,7 @@
   (:require [org.httpkit.server :as server]
             [tabblioserver.api :as api]
             [clojure.tools.logging :as log]
-            [tabblioserver.env :refer [env]])
-  (:gen-class))
+            [tabblioserver.env :refer [env]]))
 
 (defn start-server [port]
   (log/info "Starting server on port" port)
