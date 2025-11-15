@@ -1,21 +1,21 @@
-# TabblioServer
+# tabblioserver
 
 Backend server for [www.tabblio.com](https://www.tabblio.com) - A privacy-focused data analysis platform.
 
 ## Why This Repository is Public
 
-This repository is intentionally made public to **demonstrate Tabblio's privacy-first architecture**. By examining this codebase, you can verify that:
+This repository is intentionally made public to **demonstrate tabblio's privacy-first architecture**. By examining this codebase, you can verify that:
 
 - **All data analysis happens client-side** in your browser
 - **Your data files never leave your device** - they are never uploaded to our servers
 - **Only analysis templates and metadata are stored** on the server
 - **No user data is processed or stored server-side**
 
-This transparency is core to Tabblio's commitment to user privacy and data security.
+This transparency is core to tabblio's commitment to user privacy and data security.
 
-## What is Tabblio?
+## What is tabblio?
 
-[Tabblio](https://www.tabblio.com) is a browser-based data analysis platform that performs all computations locally in your browser. Whether you're working with CSV files, Excel spreadsheets, or other data formats, your data remains on your device throughout the entire analysis process.
+[tabblio](https://www.tabblio.com) is a browser-based data analysis platform that performs all computations locally in your browser. Whether you're working with CSV files, Excel spreadsheets, or other data formats, your data remains on your device throughout the entire analysis process.
 
 ### Privacy Architecture
 
@@ -37,7 +37,7 @@ This transparency is core to Tabblio's commitment to user privacy and data secur
 │         │           │
 │         ▼           │
 │  ┌──────────────┐   │
-│  │  Templates   │───┼──────────▶  TabblioServer
+│  │  Templates   │───┼──────────▶  tabblioserver
 │  │  (Metadata)  │   │            (This Repository)
 │  └──────────────┘   │
 └─────────────────────┘
@@ -45,7 +45,7 @@ This transparency is core to Tabblio's commitment to user privacy and data secur
 
 ## What This Server Does
 
-TabblioServer is a Clojure REST API that handles:
+tabblioserver is a Clojure REST API that handles:
 
 - **Template Management**: Save and load analysis templates (configurations, formulas, visualizations)
 - **User Authentication**: Integration with [Clerk](https://clerk.com) for secure user management
@@ -160,7 +160,7 @@ lein uberjar
 
 ## Contributing & Bug Reports
 
-We welcome contributions and bug reports for both the Tabblio frontend and backend!
+We welcome contributions and bug reports for both the tabblio frontend and backend!
 
 ### Reporting Issues
 
@@ -187,7 +187,7 @@ If you discover a security vulnerability, please email security@tabblio.com inst
 
 ## Privacy Commitment
 
-Tabblio is built on the principle that **your data belongs to you**. This open-source backend serves as proof of our commitment to privacy:
+tabblio is built on the principle that **your data belongs to you**. This open-source backend serves as proof of our commitment to privacy:
 
 - Source code is available for security audit
 - No data processing logic exists in the backend
