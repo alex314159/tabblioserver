@@ -1,6 +1,25 @@
+# Environment and secrets
 .env
 .env.edn
+
+# Static files
 resources/files/
+
+# Build artifacts
 target/
+
+# IDE files
 .idea/
 *.iml
+
+# REPL files
+.nrepl-port
+.lein-repl-history
+
+# Documentation (Claude-generated)
+CLAUDE.md
+PROJECT_ANALYSIS.md
+TODO.md
+
+# macOS
+.DS_Store
