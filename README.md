@@ -196,7 +196,7 @@ tabblio is built on the principle that **your data belongs to you**. This open-s
 
 ## License
 
-Copyright © 2025 Alexandre Almosni
+Copyright © 2025 AG Research Ltd
 
 This program and the accompanying materials are made available under the
 terms of the Eclipse Public License 2.0 which is available at
