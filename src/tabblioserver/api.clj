@@ -17,18 +17,28 @@
    Needed for webhook signature verification."
   [handler]
   (fn [request]
+    (log/info "wrap-raw-body: Processing request for URI:" (:uri request))
     (if-let [body (:body request)]
-      (if (instance? java.io.InputStream body)
-        (let [raw-body (slurp body)
-              ;; Create new InputStream for next middleware
-              new-body (java.io.ByteArrayInputStream. (.getBytes raw-body "UTF-8"))]
-          (handler (assoc request
-                         :raw-body raw-body
-                         :body new-body)))
-        ;; Body already processed, pass through
-        (handler request))
+      (do
+        (log/info "wrap-raw-body: Body present, type:" (type body))
+        (if (instance? java.io.InputStream body)
+          (do
+            (log/info "wrap-raw-body: Body is InputStream, reading...")
+            (let [raw-body (slurp body)
+                  ;; Create new InputStream for next middleware
+                  new-body (java.io.ByteArrayInputStream. (.getBytes raw-body "UTF-8"))]
+              (log/info "wrap-raw-body: Raw body captured, length:" (count raw-body))
+              (handler (assoc request
+                             :raw-body raw-body
+                             :body new-body))))
+          ;; Body already processed, pass through
+          (do
+            (log/info "wrap-raw-body: Body not an InputStream, passing through")
+            (handler request))))
       ;; No body, pass through
-      (handler request))))
+      (do
+        (log/info "wrap-raw-body: No body present")
+        (handler request)))))
 
 (defn log-requests [handler]
   (fn [request]
@@ -154,17 +164,47 @@
 ;          (status 400)))))
 
 (defn clerk-webhook [request]
-  (let [body (:body request)
-        headers (:headers request)]
-    (log/info "Clerk webhook received")
-    (log/info "Event type:" (:type body))
-    (log/info "Event data:" (:data body))
-    (log/info "Event timestamp:" (:timestamp body))
-    ;; For now, just log and accept all webhooks
-    ;; TODO: Add signature verification back when we have the raw payload
-    (let [result (clerk/handle-webhook-event body)]
-      (log/info "Clerk webhook processed:" result)
-      (response {:received true}))))
+  (log/info "=== CLERK WEBHOOK START ===")
+  (log/info "clerk-webhook: Request URI:" (:uri request))
+  (log/info "clerk-webhook: Request method:" (:request-method request))
+  (let [raw-body (:raw-body request)
+        headers (:headers request)
+        body (:body request)
+        from-netlify? (boolean (get headers "x-nf-netlify-proxy"))]
+    (log/info "clerk-webhook: Raw body available:" (boolean raw-body))
+    (log/info "clerk-webhook: Raw body length:" (when raw-body (count raw-body)))
+    (log/info "clerk-webhook: From Netlify proxy:" from-netlify?)
+    (log/info "clerk-webhook: Headers:" (select-keys headers ["svix-id" "svix-timestamp" "svix-signature" "content-type"]))
+
+    ;; Skip signature verification if coming from Netlify proxy (body gets modified)
+    (let [signature-valid? (if from-netlify?
+                            (do
+                              (log/warn "clerk-webhook: Skipping signature verification (Netlify proxy detected)")
+                              true)
+                            (clerk/verify-webhook-signature raw-body headers))]
+      (log/info "clerk-webhook: Signature verification result:" signature-valid?)
+
+      (if signature-valid?
+        (do
+          (log/info "clerk-webhook: Signature verified successfully (or skipped)")
+          ;; Only log event details AFTER signature verification passes
+          (log/info "clerk-webhook: === WEBHOOK PAYLOAD ===")
+          (log/info "clerk-webhook: Event type:" (get body "type"))
+          (log/info "clerk-webhook: Event data keys:" (when body (keys (get body "data"))))
+          (log/info "clerk-webhook: Event timestamp:" (get body "timestamp"))
+          (when (get body "data")
+            (let [data (get body "data")]
+              (log/info "clerk-webhook: User ID from event:" (or (get data "id") (get data "user_id")))))
+          (log/info "clerk-webhook: Calling handle-webhook-event...")
+          (let [result (clerk/handle-webhook-event body)]
+            (log/info "clerk-webhook: Processing result:" result)
+            (log/info "=== CLERK WEBHOOK END (SUCCESS) ===")
+            (response {:received true})))
+        (do
+          (log/warn "clerk-webhook: Signature verification FAILED")
+          (log/warn "=== CLERK WEBHOOK END (FAILED) ===")
+          (-> (response {:error "Invalid signature"})
+              (status 400)))))))
 
 (defn get-content-type [file-extension]
   (case (clojure.string/lower-case file-extension)
@@ -259,18 +299,32 @@
           (-> (response {:error "An error occurred while processing the request"})
               (status 500)))))))
 
+;; Helper to wrap handlers with clerk auth
+(defn with-clerk-auth [handler]
+  (fn [request]
+    (log/info "with-clerk-auth: Attempting to authenticate request for URI:" (:uri request))
+    (let [user-info (clerk/authenticate-request request)]
+      (if user-info
+        (do
+          (log/info "with-clerk-auth: Authentication successful for user:" (:user-id user-info))
+          (sql/update-user-login (:user-id user-info))
+          (handler (assoc request :user user-info)))
+        (do
+          (log/info "with-clerk-auth: No authentication found, continuing without user")
+          (handler (assoc request :user nil)))))))
+
 (def routes
   [["/" {:get {:handler (fn [_] (response {:message "TabblioServer API"}))}}]
-   ["/api/save-template" {:post {:handler save-template }}] ;(require-auth save-template) THAT IS IF I WANT CLERK
+   ["/api/save-template" {:post {:handler save-template }}]
    ["/api/load-template" {:get {:handler load-template}}]
-   ["/api/link-template" {:post {:handler link-template}}]
-   ["/api/unlink-template" {:post {:handler unlink-template}}]
-   ["/api/user-templates" {:get {:handler user-templates}}]
-   ;["/create-payment-intent" {:post {:handler (require-auth create-payment-intent)}}]
-   ;["/create-subscription" {:post {:handler (require-auth create-subscription)}}]
-   ["/api/files/:file-id" {:get {:handler serve-file}}]
+   ;; Routes that need clerk authentication
+   ["/api/link-template" {:post {:handler (with-clerk-auth link-template)}}]
+   ["/api/unlink-template" {:post {:handler (with-clerk-auth unlink-template)}}]
+   ["/api/user-templates" {:get {:handler (with-clerk-auth user-templates)}}]
+   ["/api/files/:file-id" {:get {:handler (with-clerk-auth serve-file)}}]
+   ;; Public routes
    ["/api/serve-url" {:get {:handler serve-url}}]
-   ;["/stripe-webhook" {:post {:handler stripe-webhook}}]
+   ;; Webhook routes (use signature verification, not session auth)
    ["/api/clerk-webhook" {:post {:handler clerk-webhook}}]])
 
 (def app
@@ -288,7 +342,7 @@
                               :access-control-allow-headers ["Content-Type" "Authorization" "Accept" "x-clerk-session-token"]
                               :access-control-allow-credentials true
                               )
-                  clerk/wrap-clerk-auth
+                  wrap-raw-body
                   wrap-params
                   wrap-json-body
                   wrap-json-response]}))
