@@ -27,11 +27,7 @@
                  [org.xerial/sqlite-jdbc "3.51.0.0"]
 
                  ;Authentication
-                 [com.clerk/backend-api "3.2.0"]
-
-                 ;Payments
-                 [com.stripe/stripe-java "30.2.0"]
-                 ]
+                 [com.clerk/backend-api "3.2.0"]]
   :plugins [
             ]
   :repl-options {:init-ns tabblioserver.core})

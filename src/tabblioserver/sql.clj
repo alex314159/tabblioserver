@@ -104,53 +104,6 @@
           FOR EACH ROW
         BEGIN
           UPDATE templates SET modified_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
-        END"])
-
-    ;; Create subscriptions table
-    (jdbc/execute! ds
-      ["CREATE TABLE IF NOT EXISTS subscriptions (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          user_id TEXT NOT NULL,
-          stripe_customer_id TEXT NOT NULL,
-          stripe_subscription_id TEXT,
-          status TEXT NOT NULL DEFAULT 'inactive',
-          plan_id TEXT,
-          current_period_start DATETIME,
-          current_period_end DATETIME,
-          cancel_at_period_end BOOLEAN DEFAULT FALSE,
-          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )"])
-
-    ;; Create payments table for tracking individual payments
-    (jdbc/execute! ds
-      ["CREATE TABLE IF NOT EXISTS payments (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          user_id TEXT NOT NULL,
-          stripe_payment_intent_id TEXT NOT NULL,
-          amount INTEGER NOT NULL,
-          currency TEXT NOT NULL DEFAULT 'usd',
-          status TEXT NOT NULL,
-          metadata TEXT,
-          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )"])
-
-    ;; Create indexes for subscriptions
-    (jdbc/execute! ds ["CREATE INDEX IF NOT EXISTS idx_subscriptions_user_id ON subscriptions(user_id)"])
-    (jdbc/execute! ds ["CREATE INDEX IF NOT EXISTS idx_subscriptions_stripe_customer_id ON subscriptions(stripe_customer_id)"])
-    (jdbc/execute! ds ["CREATE INDEX IF NOT EXISTS idx_subscriptions_status ON subscriptions(status)"])
-
-    ;; Create indexes for payments
-    (jdbc/execute! ds ["CREATE INDEX IF NOT EXISTS idx_payments_user_id ON payments(user_id)"])
-    (jdbc/execute! ds ["CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status)"])
-
-    ;; Create trigger for subscriptions updated_at
-    (jdbc/execute! ds
-      ["CREATE TRIGGER IF NOT EXISTS update_subscriptions_updated_at
-          AFTER UPDATE ON subscriptions
-          FOR EACH ROW
-        BEGIN
-          UPDATE subscriptions SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
         END"])))
 
 (defn save-template [template-data]

@@ -7,7 +7,6 @@
             [ring.util.io :as io]
             [tabblioserver.sql :as sql]
             [tabblioserver.clerk :as clerk]
-    ;[tabblioserver.stripe :as stripe]
             [clojure.tools.logging :as log]
             [clojure.java.io :as jio]
             [cheshire.core]))
@@ -111,57 +110,6 @@
       (response {:templates templates}))
     (-> (response {:error "User needs to be logged in to view their templates"})
         (status 401))))
-
-;(defn create-payment-intent [request]
-;  (let [user (:user request)
-;        body (:body request)
-;        amount (:amount body)
-;        currency (:currency body "usd")
-;        user-id (:user-id user)]
-;    (if user-id
-;      (let [result (stripe/create-payment-intent amount currency nil {"user_id" user-id})]
-;        (if (:success result)
-;          (do
-;            (stripe/save-payment-in-db {:user-id user-id
-;                                       :payment-intent-id (:payment-intent-id result)
-;                                       :amount amount
-;                                       :currency currency
-;                                       :status (:status result)})
-;            (response {:client-secret (:client-secret result)
-;                      :payment-intent-id (:payment-intent-id result)}))
-;          (-> (response {:error (:error result)})
-;              (status 400))))
-;      (-> (response {:error "Authentication required"})
-;          (status 401)))))
-
-;(defn create-subscription [request]
-;  (let [user (:user request)
-;        body (:body request)
-;        price-id (:price-id body)
-;        user-id (:user-id user)]
-;    (if user-id
-;      (let [customer-result (stripe/create-customer user-id (:email body) (:name body))]
-;        (if (:success customer-result)
-;          (let [subscription-result (stripe/create-subscription (:customer-id customer-result) price-id)]
-;            (if (:success subscription-result)
-;              (response {:subscription-id (:subscription-id subscription-result)
-;                        :status (:status subscription-result)})
-;              (-> (response {:error (:error subscription-result)})
-;                  (status 400))))
-;          (-> (response {:error (:error customer-result)})
-;              (status 400))))
-;      (-> (response {:error "Authentication required"})
-;          (status 401)))))
-
-;(defn stripe-webhook [request]
-;  (let [payload (slurp (:body request))
-;        signature (get-in request [:headers "stripe-signature"])]
-;    (if-let [event (stripe/verify-webhook-signature payload signature)]
-;      (let [result (stripe/handle-webhook-event event)]
-;        (log/info "Webhook processed:" result)
-;        (response {:received true}))
-;      (-> (response {:error "Invalid signature"})
-;          (status 400)))))
 
 (defn clerk-webhook [request]
   (log/info "=== CLERK WEBHOOK START ===")

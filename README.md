@@ -66,7 +66,7 @@ tabblioserver is a Clojure REST API that handles:
 - **Routing**: Reitit 0.9.2
 - **Database**: SQLite 3.51.0.0
 - **Authentication**: Clerk Backend API 3.2.0
-- **Payments**: Stripe Java SDK 30.2.0 (prepared but not yet active)
+- **Payments**: Clerk Billing (handled via Clerk)
 
 ## Quick Start
 
@@ -109,9 +109,7 @@ Create a `.env.edn` file with the following configuration:
 {:database-url "jdbc:sqlite:tabblio.db"
  :port "8082"
  :clerk-secret-key "sk_test_..."
- :clerk-webhook-secret "whsec_..."
- :stripe-api-key "sk_test_..."
- :stripe-webhook-secret "whsec_..."}
+ :clerk-webhook-secret "whsec_..."}
 ```
 
 **Note**: Never commit `.env.edn` to version control. It contains sensitive API keys.
@@ -138,8 +136,6 @@ The server uses SQLite with the following core tables:
 - **users**: Clerk user lifecycle tracking
 - **templates**: Analysis template storage (EDN serialized)
 - **user_templates**: Template ownership mapping
-- **subscriptions**: Payment and subscription tracking (prepared for future use)
-- **payments**: Payment intent tracking (prepared for future use)
 
 ## Development
 
@@ -179,7 +175,7 @@ We welcome contributions and bug reports for both the tabblio frontend and backe
 
 ## Project Status
 
-This project is in **active development** and approaching production readiness. Some features are implemented but not yet enabled (e.g., Stripe payments).
+This project is in **active development** and approaching production readiness.
 
 ## Security
 
