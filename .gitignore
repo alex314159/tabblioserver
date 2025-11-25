@@ -1,5 +1,4 @@
 # Environment and secrets
-.env
 .env.edn
 
 # Static files
