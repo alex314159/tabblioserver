@@ -7,6 +7,7 @@
             [ring.util.io :as io]
             [tabblioserver.sql :as sql]
             [tabblioserver.clerk :as clerk]
+            [tabblioserver.throttling :as throttle]
             [clojure.tools.logging :as log]
             [clojure.java.io :as jio]
             [cheshire.core]))
@@ -62,21 +63,25 @@
 
 (defn save-template [request]
   (reset! last-request request)
-  (let [                                                    ;user (:user request)
-        template-data (clojure.edn/read-string (:body request))
-        ;user-id (:user-id user)
-        user-id nil
-        enhanced-data (assoc template-data :username (or user-id "") :nickname "")]
-    (response (sql/save-template enhanced-data))))
+  ;; Rate limit: 30 seconds for authenticated users, 2 minutes for anonymous
+  (if-let [rate-limit-response (throttle/check-rate-limit request (* 30 1000) (* 2 60 1000))]
+    rate-limit-response
+    (let [template-data (clojure.edn/read-string (:body request))
+          user-id nil
+          enhanced-data (assoc template-data :username (or user-id "") :nickname "")]
+      (response (sql/save-template enhanced-data)))))
 
 (defn load-template [request]
   (reset! last-request request)
-  (let [template-id (get-in request [:query-params "uuid"])
-        template-data (sql/load-template template-id)]
-    (if template-data
-      (response template-data)
-      (-> (response {:error "Template not found"})
-          (status 404)))))
+  ;; Rate limit: 30 seconds for authenticated users, 2 minutes for anonymous
+  (if-let [rate-limit-response (throttle/check-rate-limit request (* 30 1000) (* 2 60 1000))]
+    rate-limit-response
+    (let [template-id (get-in request [:query-params "uuid"])
+          template-data (sql/load-template template-id)]
+      (if template-data
+        (response template-data)
+        (-> (response {:error "Template not found"})
+            (status 404))))))
 
 (defn link-template [request]
   (if-let [user (:user request)]
@@ -169,10 +174,10 @@
     "application/octet-stream"))
 
 (defn serve-file [request]
-  (let [user (:user request)
-        user-id (:user-id user)
-        filename (get-in request [:path-params :file-id])]
-    (if user-id
+  (let [filename (get-in request [:path-params :file-id])]
+    ;; Rate limit: 30 seconds for authenticated users, 2 minutes for anonymous, per file
+    (if-let [rate-limit-response (throttle/check-rate-limit request (* 30 1000) (* 2 60 1000) filename)]
+      rate-limit-response
       (let [file-path (str "resources/files/" filename)]
         (if (.exists (jio/file file-path))
           (let [file-extension (last (clojure.string/split filename #"\."))]
@@ -180,9 +185,7 @@
                 (assoc-in [:headers "Content-Type"] (get-content-type file-extension))
                 (assoc-in [:headers "Content-Disposition"] (str "attachment; filename=\"" filename "\""))))
           (-> (response {:error "File not found"})
-              (status 404))))
-      (-> (response {:error "Authentication required"})
-          (status 401)))))
+              (status 404)))))))
 
 (def allowed-file-extensions #{"txt" "csv" "tsv" "xls" "xlsx" "xlsm"})
 (def max-file-size (* 10 1024 1024)) ; 10MB in bytes
@@ -197,56 +200,62 @@
       (clojure.string/lower-case extension))))
 
 (defn serve-url [request]
-  (let [url-string (or (get-in request [:query-params "url"])
-                       (get-in request [:body :url]))]
-    (if-not url-string
-      (-> (response {:error "URL parameter is required"})
-          (status 400))
-      (try
-        ;; First, check file extension from URL
-        (let [file-extension (get-file-extension-from-url url-string)
-              uri (java.net.URI. url-string)
-              url (.toURL uri)]
-          (if-not (allowed-file-extensions file-extension)
-            (-> (response {:error (str "File type not allowed. Allowed types: " (clojure.string/join ", " allowed-file-extensions))})
-                (status 400))
-            ;; Make HEAD request to check Content-Length
-            (let [connection (doto (.openConnection url)
-                              (.setRequestMethod "HEAD")
-                              (.setConnectTimeout 5000)
-                              (.setReadTimeout 5000)
-                              (.connect))
-                  content-length (.getContentLengthLong connection)]
-
-              (if (and (pos? content-length) (> content-length max-file-size))
-                (-> (response {:error (str "File too large. Maximum size is 10MB, file is " (/ content-length 1024 1024) "MB")})
+  (if-let [user (:user request)]
+    (let [url-string (or (get-in request [:query-params "url"])
+                         (get-in request [:body :url]))]
+      (if-not url-string
+        (-> (response {:error "URL parameter is required"})
+            (status 400))
+        ;; Rate limit: 30 seconds for authenticated users, per URL
+        (if-let [rate-limit-response (throttle/check-rate-limit request (* 30 1000) (* 30 1000) url-string)]
+          rate-limit-response
+          (try
+            ;; First, check file extension from URL
+            (let [file-extension (get-file-extension-from-url url-string)
+                  uri (java.net.URI. url-string)
+                  url (.toURL uri)]
+              (if-not (allowed-file-extensions file-extension)
+                (-> (response {:error (str "File type not allowed. Allowed types: " (clojure.string/join ", " allowed-file-extensions))})
                     (status 400))
-                ;; Download and stream the file
-                (let [input-stream (.getInputStream (.openConnection url))
-                      filename (or (last (clojure.string/split url-string #"/")) "download")]
-                  (-> (response input-stream)
-                      (assoc-in [:headers "Content-Type"] (get-content-type file-extension))
-                      (assoc-in [:headers "Content-Disposition"] (str "attachment; filename=\"" filename "\""))))))))
-        (catch java.net.URISyntaxException e
-          (log/error "Invalid URL syntax:" e)
-          (-> (response {:error "Invalid URL"})
-              (status 400)))
-        (catch java.net.MalformedURLException e
-          (log/error "Malformed URL:" e)
-          (-> (response {:error "Invalid URL"})
-              (status 400)))
-        (catch java.net.UnknownHostException e
-          (log/error "Unknown host:" e)
-          (-> (response {:error "Unable to reach the specified URL"})
-              (status 400)))
-        (catch java.io.IOException e
-          (log/error "IO error downloading file:" e)
-          (-> (response {:error "Error downloading file"})
-              (status 500)))
-        (catch Exception e
-          (log/error "Error serving URL:" e)
-          (-> (response {:error "An error occurred while processing the request"})
-              (status 500)))))))
+                ;; Make HEAD request to check Content-Length
+                (let [connection (doto (.openConnection url)
+                                  (.setRequestMethod "HEAD")
+                                  (.setConnectTimeout 5000)
+                                  (.setReadTimeout 5000)
+                                  (.connect))
+                      content-length (.getContentLengthLong connection)]
+
+                  (if (and (pos? content-length) (> content-length max-file-size))
+                    (-> (response {:error (str "File too large. Maximum size is 10MB, file is " (/ content-length 1024 1024) "MB")})
+                        (status 400))
+                    ;; Download and stream the file
+                    (let [input-stream (.getInputStream (.openConnection url))
+                          filename (or (last (clojure.string/split url-string #"/")) "download")]
+                      (-> (response input-stream)
+                          (assoc-in [:headers "Content-Type"] (get-content-type file-extension))
+                          (assoc-in [:headers "Content-Disposition"] (str "attachment; filename=\"" filename "\""))))))))
+            (catch java.net.URISyntaxException e
+              (log/error "Invalid URL syntax:" e)
+              (-> (response {:error "Invalid URL"})
+                  (status 400)))
+            (catch java.net.MalformedURLException e
+              (log/error "Malformed URL:" e)
+              (-> (response {:error "Invalid URL"})
+                  (status 400)))
+            (catch java.net.UnknownHostException e
+              (log/error "Unknown host:" e)
+              (-> (response {:error "Unable to reach the specified URL"})
+                  (status 400)))
+            (catch java.io.IOException e
+              (log/error "IO error downloading file:" e)
+              (-> (response {:error "Error downloading file"})
+                  (status 500)))
+            (catch Exception e
+              (log/error "Error serving URL:" e)
+              (-> (response {:error "An error occurred while processing the request"})
+                  (status 500)))))))
+    (-> (response {:error "Authentication required"})
+        (status 401))))
 
 ;; Helper to wrap handlers with clerk auth
 (defn with-clerk-auth [handler]
@@ -264,15 +273,15 @@
 
 (def routes
   [["/" {:get {:handler (fn [_] (response {:message "tabblio server API"}))}}]
-   ["/api/save-template" {:post {:handler save-template}}]
-   ["/api/load-template" {:get {:handler load-template}}]
-   ;; Routes that need clerk authentication
+   ;; Template routes (optional auth - better rate limits for authenticated users)
+   ["/api/save-template" {:post {:handler (with-clerk-auth save-template)}}]
+   ["/api/load-template" {:get {:handler (with-clerk-auth load-template)}}]
+   ["/api/files/:file-id" {:get {:handler (with-clerk-auth serve-file)}}]
+   ;; Routes that require authentication
    ["/api/link-template" {:post {:handler (with-clerk-auth link-template)}}]
    ["/api/unlink-template" {:post {:handler (with-clerk-auth unlink-template)}}]
    ["/api/user-templates" {:get {:handler (with-clerk-auth user-templates)}}]
-   ["/api/files/:file-id" {:get {:handler (with-clerk-auth serve-file)}}]
-   ;; Public routes
-   ["/api/serve-url" {:get {:handler serve-url}}]
+   ["/api/serve-url" {:get {:handler (with-clerk-auth serve-url)}}]
    ;; Webhook routes (use signature verification, not session auth)
    ["/api/clerk-webhook" {:post {:handler clerk-webhook}}]])
 
