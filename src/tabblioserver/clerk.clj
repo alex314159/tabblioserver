@@ -51,9 +51,11 @@
         (let [headers-map (ring-headers-to-java-map (:headers ring-req))]
           (log/info "clerk-auth: Headers converted successfully")
           (log/info "clerk-auth: Building authentication options with origin:" origin)
-          (let [options (-> (AuthenticateRequestOptions/secretKey clerk-secret-key)
-                           (.authorizedParty origin)
-                           (.build))]
+          (let [options-builder (AuthenticateRequestOptions/secretKey clerk-secret-key)
+                options-with-party (if origin
+                                    (.authorizedParty options-builder origin)
+                                    options-builder)
+                options (.build options-with-party)]
             (log/info "clerk-auth: Options built, calling authenticateRequest...")
             (let [request-state (AuthenticateRequest/authenticateRequest headers-map options)]
               (log/info "clerk-auth: Request state received")
@@ -154,15 +156,14 @@
 (defn handle-webhook-event [event-data]
   (log/info "=== HANDLE WEBHOOK EVENT START ===")
   (log/info "handle-event: Event data available:" (boolean event-data))
-  ;; Use string keys instead of keyword keys (wrap-json-body doesn't keywordize by default)
-  (let [event-type (get event-data "type")
-        event-object (get event-data "data")]
+  (let [event-type (:type event-data)
+        event-object (:data event-data)]
     (log/info "handle-event: Event type:" event-type)
     (log/info "handle-event: Event object available:" (boolean event-object))
     (log/info "handle-event: Event object keys:" (when event-object (keys event-object)))
     (case event-type
-      "user.created"
-      (let [user-id (get event-object "id")]
+      :user.created
+      (let [user-id (:id event-object)]
         (log/info "handle-event: User created event, user-id:" user-id)
         (log/info "handle-event: Calling sql/create-user...")
         (let [result (sql/create-user user-id)]
@@ -170,10 +171,10 @@
           (log/info "=== HANDLE WEBHOOK EVENT END (USER CREATED) ===")
           {:status "success" :message "User created"}))
 
-      "session.created"
-      (let [user-id (get event-object "user_id")
-            user-obj (get event-object "user")
-            actual-user-id (or user-id (get user-obj "id"))]
+      :session.created
+      (let [user-id (:user_id event-object)
+            user-obj (:user event-object)
+            actual-user-id (or user-id (:id user-obj))]
         (log/info "handle-event: Session created event, user-id:" actual-user-id)
         (log/info "handle-event: Calling sql/update-user-login...")
         (let [result (sql/update-user-login actual-user-id)]
@@ -181,8 +182,8 @@
           (log/info "=== HANDLE WEBHOOK EVENT END (SESSION CREATED) ===")
           {:status "success" :message "Login recorded"}))
 
-      "user.deleted"
-      (let [user-id (get event-object "id")]
+      :user.deleted
+      (let [user-id (:id event-object)]
         (log/info "handle-event: User deleted event, user-id:" user-id)
         (log/info "handle-event: Calling sql/delete-user...")
         (let [result (sql/delete-user user-id)]

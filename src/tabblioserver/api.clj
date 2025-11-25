@@ -84,6 +84,7 @@
           body (:body request)
           uuid (:uuid body)
           nickname (:nickname body)]
+      (log/info user-id body uuid nickname)
       (if uuid
         (response (sql/link-template user-id uuid nickname))
         (-> (response {:error "UUID is required"})
@@ -137,12 +138,12 @@
           (log/info "clerk-webhook: Signature verified successfully (or skipped)")
           ;; Only log event details AFTER signature verification passes
           (log/info "clerk-webhook: === WEBHOOK PAYLOAD ===")
-          (log/info "clerk-webhook: Event type:" (get body "type"))
-          (log/info "clerk-webhook: Event data keys:" (when body (keys (get body "data"))))
-          (log/info "clerk-webhook: Event timestamp:" (get body "timestamp"))
-          (when (get body "data")
-            (let [data (get body "data")]
-              (log/info "clerk-webhook: User ID from event:" (or (get data "id") (get data "user_id")))))
+          (log/info "clerk-webhook: Event type:" (:type body))
+          (log/info "clerk-webhook: Event data keys:" (when body (keys (:data body))))
+          (log/info "clerk-webhook: Event timestamp:" (:timestamp body))
+          (when (:data body)
+            (let [data (:data body)]
+              (log/info "clerk-webhook: User ID from event:" (or (:id data) (:user_id data)))))
           (log/info "clerk-webhook: Calling handle-webhook-event...")
           (let [result (clerk/handle-webhook-event body)]
             (log/info "clerk-webhook: Processing result:" result)
@@ -262,8 +263,8 @@
           (handler (assoc request :user nil)))))))
 
 (def routes
-  [["/" {:get {:handler (fn [_] (response {:message "TabblioServer API"}))}}]
-   ["/api/save-template" {:post {:handler save-template }}]
+  [["/" {:get {:handler (fn [_] (response {:message "tabblio server API"}))}}]
+   ["/api/save-template" {:post {:handler save-template}}]
    ["/api/load-template" {:get {:handler load-template}}]
    ;; Routes that need clerk authentication
    ["/api/link-template" {:post {:handler (with-clerk-auth link-template)}}]
@@ -292,5 +293,5 @@
                               )
                   wrap-raw-body
                   wrap-params
-                  wrap-json-body
+                  #(wrap-json-body % {:keywords? true})
                   wrap-json-response]}))
