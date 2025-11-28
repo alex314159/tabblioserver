@@ -107,7 +107,7 @@ Create a `.env.edn` file with the following configuration:
 
 ```clojure
 {:database-url "jdbc:sqlite:tabblio.db"
- :port "8082"
+ :port "8000"
  :clerk-secret-key "sk_test_..."
  :clerk-webhook-secret "whsec_..."}
 ```
@@ -179,7 +179,7 @@ This project is in **active development** and approaching production readiness.
 
 ## Security
 
-If you discover a security vulnerability, please email security@tabblio.com instead of filing a public issue. We take security seriously and will respond promptly.
+If you discover a security vulnerability, please email help@tabblio.com instead of filing a public issue. We take security seriously and will respond promptly.
 
 ## Privacy Commitment
 
@@ -209,7 +209,7 @@ at https://www.gnu.org/software/classpath/license.html.
 
 - Website: [www.tabblio.com](https://www.tabblio.com)
 - Issues: [GitHub Issues](https://github.com/alex314159/tabblioserver/issues)
-- Email: contact@tabblio.com
+- Email: help@tabblio.com
 
 ---
 

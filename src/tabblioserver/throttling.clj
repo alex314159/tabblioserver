@@ -46,7 +46,7 @@
 
      (if (and last-access (< (- now last-access) limit-ms))
        ;; Rate limited
-       (let [seconds-remaining (Math/ceil (/ (- limit-ms (- now last-access)) 1000))
+       (let [seconds-remaining (int (Math/ceil (/ (- limit-ms (- now last-access)) 1000)))
              message (if user-id
                        (format "Please wait %d seconds before trying again" seconds-remaining)
                        (format "Please wait %d seconds before trying again (rate limit for anonymous users)" seconds-remaining))]

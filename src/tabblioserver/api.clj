@@ -63,8 +63,8 @@
 
 (defn save-template [request]
   (reset! last-request request)
-  ;; Rate limit: 30 seconds for authenticated users, 2 minutes for anonymous
-  (if-let [rate-limit-response (throttle/check-rate-limit request (* 30 1000) (* 2 60 1000))]
+  ;; Rate limit: 1 second for debugging
+  (if-let [rate-limit-response (throttle/check-rate-limit request 1000 1000)]
     rate-limit-response
     (let [template-data (clojure.edn/read-string (:body request))
           user-id nil
@@ -73,8 +73,8 @@
 
 (defn load-template [request]
   (reset! last-request request)
-  ;; Rate limit: 30 seconds for authenticated users, 2 minutes for anonymous
-  (if-let [rate-limit-response (throttle/check-rate-limit request (* 30 1000) (* 2 60 1000))]
+  ;; Rate limit: 1 second for debugging
+  (if-let [rate-limit-response (throttle/check-rate-limit request 1000 1000)]
     rate-limit-response
     (let [template-id (get-in request [:query-params "uuid"])
           template-data (sql/load-template template-id)]
@@ -175,8 +175,8 @@
 
 (defn serve-file [request]
   (let [filename (get-in request [:path-params :file-id])]
-    ;; Rate limit: 30 seconds for authenticated users, 2 minutes for anonymous, per file
-    (if-let [rate-limit-response (throttle/check-rate-limit request (* 30 1000) (* 2 60 1000) filename)]
+    ;; Rate limit: 1 second for debugging
+    (if-let [rate-limit-response (throttle/check-rate-limit request 1000 1000 filename)]
       rate-limit-response
       (let [file-path (str "resources/files/" filename)]
         (if (.exists (jio/file file-path))
@@ -206,8 +206,8 @@
       (if-not url-string
         (-> (response {:error "URL parameter is required"})
             (status 400))
-        ;; Rate limit: 30 seconds for authenticated users, per URL
-        (if-let [rate-limit-response (throttle/check-rate-limit request (* 30 1000) (* 30 1000) url-string)]
+        ;; Rate limit: 1 second for debugging
+        (if-let [rate-limit-response (throttle/check-rate-limit request 1000 1000 url-string)]
           rate-limit-response
           (try
             ;; First, check file extension from URL
