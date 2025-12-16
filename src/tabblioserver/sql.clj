@@ -72,6 +72,7 @@
           nickname TEXT,
           template TEXT NOT NULL,
            content_hash INTEGER,  -- Add this
+           template_version TEXT,
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
           modified_at DATETIME DEFAULT CURRENT_TIMESTAMP,
           last_opened_at DATETIME,
@@ -121,11 +122,12 @@
           {:result "Duplicate" :uuid uuid :existing-uuid (:uuid existing)})
         (try
           (sql/insert! conn :templates
-                       {:uuid         uuid
-                        :username     username
-                        :nickname     nickname
-                        :template     template-json
-                        :content_hash content-hash})
+                       {:uuid             uuid
+                        :username         username
+                        :nickname         nickname
+                        :template         template-json
+                        :content_hash     content-hash
+                        :template_version (:template/version template-data)})
           {:result "Success" :uuid uuid}
           (catch Exception e
             (log/error "Error saving template:" e)
