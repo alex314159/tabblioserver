@@ -26,6 +26,9 @@
                  [com.github.seancorfield/next.jdbc "1.3.1070"]
                  [org.xerial/sqlite-jdbc "3.51.0.0"]
 
+                 ;Logging users
+                 [io.github.tonsky/clj-simple-stats "1.1.0"]
+
                  ;Authentication
                  [com.clerk/backend-api "3.2.0"]]
   :plugins [

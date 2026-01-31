@@ -4,6 +4,7 @@
             [ring.middleware.params :refer [wrap-params]]
             [ring.middleware.cors :refer [wrap-cors]]
             [ring.util.response :refer [response status]]
+            [clj-simple-stats.core]
             [ring.util.io :as io]
             [tabblioserver.sql :as sql]
             [tabblioserver.clerk :as clerk]
@@ -29,8 +30,8 @@
                   new-body (java.io.ByteArrayInputStream. (.getBytes raw-body "UTF-8"))]
               (log/info "wrap-raw-body: Raw body captured, length:" (count raw-body))
               (handler (assoc request
-                             :raw-body raw-body
-                             :body new-body))))
+                              :raw-body raw-body
+                              :body new-body))))
           ;; Body already processed, pass through
           (do
             (log/info "wrap-raw-body: Body not an InputStream, passing through")
@@ -132,10 +133,10 @@
 
     ;; Skip signature verification if coming from Netlify proxy (body gets modified)
     (let [signature-valid? (if from-netlify?
-                            (do
-                              (log/warn "clerk-webhook: Skipping signature verification (Netlify proxy detected)")
-                              true)
-                            (clerk/verify-webhook-signature raw-body headers))]
+                             (do
+                               (log/warn "clerk-webhook: Skipping signature verification (Netlify proxy detected)")
+                               true)
+                             (clerk/verify-webhook-signature raw-body headers))]
       (log/info "clerk-webhook: Signature verification result:" signature-valid?)
 
       (if signature-valid?
@@ -219,10 +220,10 @@
                     (status 400))
                 ;; Make HEAD request to check Content-Length
                 (let [connection (doto (.openConnection url)
-                                  (.setRequestMethod "HEAD")
-                                  (.setConnectTimeout 5000)
-                                  (.setReadTimeout 5000)
-                                  (.connect))
+                                   (.setRequestMethod "HEAD")
+                                   (.setConnectTimeout 5000)
+                                   (.setReadTimeout 5000)
+                                   (.connect))
                       content-length (.getContentLengthLong connection)]
 
                   (if (and (pos? content-length) (> content-length max-file-size))
@@ -271,8 +272,13 @@
           (log/info "with-clerk-auth: No authentication found, continuing without user")
           (handler (assoc request :user nil)))))))
 
+(defn tracker [_]
+  (-> (response "")
+      (assoc-in [:headers "Content-Type"] "text/html")))
+
 (def routes
   [["/" {:get {:handler (fn [_] (response {:message "tabblio server API"}))}}]
+   ["/api/tracker" {:get {:handler tracker}}]
    ;; Template routes (optional auth - better rate limits for authenticated users)
    ["/api/save-template" {:post {:handler (with-clerk-auth save-template)}}]
    ["/api/load-template" {:get {:handler (with-clerk-auth load-template)}}]
@@ -287,20 +293,20 @@
 
 (def app
   (ring/ring-handler
-    (ring/router routes)
-    (ring/routes
-      (ring/create-default-handler
-        {:not-found          (constantly {:status 404 :body "Not found"})
-         :method-not-allowed (constantly {:status 204})}))
-    {:middleware [log-requests
-                  #(wrap-cors % :access-control-allow-origin [#"https://www\.tabblio\.com"
-                                                              #"https://tabblio\.com"
-                                                              #"http://localhost:.*"]
-                              :access-control-allow-methods [:get :put :post :delete :options]
-                              :access-control-allow-headers ["Content-Type" "Authorization" "Accept" "x-clerk-session-token"]
-                              :access-control-allow-credentials true
-                              )
-                  wrap-raw-body
-                  wrap-params
-                  #(wrap-json-body % {:keywords? true})
-                  wrap-json-response]}))
+   (ring/router routes)
+   (ring/routes
+    (ring/create-default-handler
+     {:not-found          (constantly {:status 404 :body "Not found"})
+      :method-not-allowed (constantly {:status 204})}))
+   {:middleware [clj-simple-stats.core/wrap-stats
+                 log-requests
+                 #(wrap-cors % :access-control-allow-origin [#"https://www\.tabblio\.com"
+                                                             #"https://tabblio\.com"
+                                                             #"http://localhost:.*"]
+                             :access-control-allow-methods [:get :put :post :delete :options]
+                             :access-control-allow-headers ["Content-Type" "Authorization" "Accept" "x-clerk-session-token"]
+                             :access-control-allow-credentials true)
+                 wrap-raw-body
+                 wrap-params
+                 #(wrap-json-body % {:keywords? true})
+                 wrap-json-response]}))
