@@ -185,6 +185,12 @@
           (telegram/notify-user-login actual-user-id)
           {:status "success" :message "Login recorded"}))
 
+      :session.removed
+      (let [user-id (:user_id event-object)]
+        (log/info "handle-event: Session removed event, user-id:" user-id)
+        (telegram/notify-user-logout user-id)
+        {:status "success" :message "Logout recorded"})
+
       :user.deleted
       (let [user-id (:id event-object)]
         (log/info "handle-event: User deleted event, user-id:" user-id)

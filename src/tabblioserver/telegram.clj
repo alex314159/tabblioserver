@@ -23,6 +23,9 @@
 (defn notify-user-login [user-id]
   (notify (str "User logged in: " user-id)))
 
+(defn notify-user-logout [user-id]
+  (notify (str "User logged out: " user-id)))
+
 (defn notify-template-saved [user-id]
   (notify (str "Template saved by " (or user-id "anonymous"))))
 
