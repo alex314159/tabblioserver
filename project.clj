@@ -30,6 +30,6 @@
                  [io.github.tonsky/clj-simple-stats "1.2.0"]
 
                  ;Authentication
-                 [com.clerk/backend-api "3.2.0"]]
+                 [com.clerk/backend-api "4.1.3"]]
   :plugins []
   :repl-options {:init-ns tabblioserver.core})
