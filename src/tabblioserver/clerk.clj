@@ -157,7 +157,7 @@
 (defn handle-webhook-event [event-data]
   (log/info "=== HANDLE WEBHOOK EVENT START ===")
   (log/info "handle-event: Event data available:" (boolean event-data))
-  (let [event-type (:type event-data)
+  (let [event-type (keyword (:type event-data))
         event-object (:data event-data)]
     (log/info "handle-event: Event type:" event-type)
     (log/info "handle-event: Event object available:" (boolean event-object))
