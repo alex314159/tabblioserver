@@ -61,12 +61,11 @@ tabblioserver is a Clojure REST API that handles:
 
 ## Technology Stack
 
-- **Language**: Clojure 1.12.1
+- **Language**: Clojure 1.12.4
 - **HTTP Server**: http-kit 2.8.1
-- **Routing**: Reitit 0.9.2
-- **Database**: SQLite 3.51.0.0
+- **Routing**: Reitit 0.10.0
+- **Database**: SQLite 3.51.2.0
 - **Authentication**: Clerk Backend API 3.2.0
-- **Payments**: Clerk Billing (handled via Clerk)
 
 ## Quick Start
 
@@ -103,13 +102,15 @@ The server will start on port 8082 by default.
 
 ## Configuration
 
-Create a `.env.edn` file with the following configuration:
+Create a `.env.edn` file based on `.env.edn.example`:
 
 ```clojure
 {:database-url "jdbc:sqlite:tabblio.db"
- :port "8000"
- :clerk-secret-key "sk_test_..."
- :clerk-webhook-secret "whsec_..."}
+ :port "8082"
+ :clerk-secret-key "sk_..."
+ :clerk-webhook-secret "whsec_..."
+ :telegram-token "your-telegram-bot-token"
+ :telegram-recipent "your-telegram-chat-id"}
 ```
 
 **Note**: Never commit `.env.edn` to version control. It contains sensitive API keys.
@@ -118,23 +119,24 @@ Create a `.env.edn` file with the following configuration:
 
 ### Public Endpoints
 - `GET /` - Health check
-- `POST /api/save-template` - Save analysis template
-- `GET /api/load-template?uuid={uuid}` - Load template by UUID
-- `POST /api/clerk-webhook` - Clerk authentication webhooks
+- `GET /api/tracker` - Anonymous usage tracking pixel
+- `POST /api/save-template` - Save analysis template (rate limited)
+- `GET /api/load-template?uuid={uuid}` - Load template by UUID (rate limited)
+- `POST /api/clerk-webhook` - Clerk authentication webhooks (signature verified)
 
 ### Authenticated Endpoints
 - `POST /api/link-template` - Link template to user account
 - `POST /api/unlink-template` - Unlink template from user
-- `GET /api/user-templates` - Get user's templates
+- `GET /api/user-templates` - Get user's saved templates
 - `GET /api/files/:file-id` - Serve static files
-- `GET /api/serve-url?url={url}` - Proxy external URLs
+- `GET /api/serve-url?url={url}` - Proxy and validate external file URLs
 
 ## Database Schema
 
 The server uses SQLite with the following core tables:
 
 - **users**: Clerk user lifecycle tracking
-- **templates**: Analysis template storage (EDN serialized)
+- **templates**: Analysis template storage
 - **user_templates**: Template ownership mapping
 
 ## Development
@@ -175,7 +177,7 @@ We welcome contributions and bug reports for both the tabblio frontend and backe
 
 ## Project Status
 
-This project is in **active development** and approaching production readiness.
+This project is in **active development** and in production at [www.tabblio.com](https://www.tabblio.com).
 
 ## Security
 
@@ -192,7 +194,7 @@ tabblio is built on the principle that **your data belongs to you**. This open-s
 
 ## License
 
-Copyright © 2025 AG Research Ltd
+Copyright © 2025-2026 AG Research Ltd
 
 This program and the accompanying materials are made available under the
 terms of the Eclipse Public License 2.0 which is available at

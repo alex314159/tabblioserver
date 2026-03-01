@@ -5,10 +5,10 @@
             [ring.middleware.cors :refer [wrap-cors]]
             [ring.util.response :refer [response status]]
             [clj-simple-stats.core]
-            [ring.util.io :as io]
             [tabblioserver.sql :as sql]
             [tabblioserver.clerk :as clerk]
             [tabblioserver.throttling :as throttle]
+            [tabblioserver.telegram :as telegram]
             [clojure.tools.logging :as log]
             [clojure.java.io :as jio]
             [cheshire.core]))
@@ -47,7 +47,6 @@
           uri (:uri request)
           start-time (System/currentTimeMillis)]
       (log/info (str "[" method "] " uri " - Request started"))
-      (log/info request)
       (let [response (handler request)
             duration (- (System/currentTimeMillis) start-time)]
         (log/info (str "[" method "] " uri " - " (:status response 200) " (" duration "ms)"))
@@ -60,25 +59,22 @@
       (-> (response {:error "Authentication required"})
           (status 401)))))
 
-(def last-request (atom nil))
-
 (defn save-template [request]
-  (reset! last-request request)
-  ;; Rate limit: 1 second for debugging
-  (if-let [rate-limit-response (throttle/check-rate-limit request 1000 1000)]
+  (if-let [rate-limit-response (throttle/check-rate-limit request 1000 3000)]
     rate-limit-response
-    (let [template-data (clojure.edn/read-string (:body request))
-          user-id nil
+    (let [user-id (get-in request [:user :user-id])
+          template-data (clojure.edn/read-string (:body request))
           enhanced-data (assoc template-data :username (or user-id "") :nickname "")]
+      (telegram/notify-template-saved user-id)
       (response (sql/save-template enhanced-data)))))
 
 (defn load-template [request]
-  (reset! last-request request)
-  ;; Rate limit: 1 second for debugging
-  (if-let [rate-limit-response (throttle/check-rate-limit request 1000 1000)]
+  (if-let [rate-limit-response (throttle/check-rate-limit request 1000 3000)]
     rate-limit-response
-    (let [template-id (get-in request [:query-params "uuid"])
+    (let [user-id (get-in request [:user :user-id])
+          template-id (get-in request [:query-params "uuid"])
           template-data (sql/load-template template-id)]
+      (telegram/notify-template-loaded template-id user-id)
       (if template-data
         (response template-data)
         (-> (response {:error "Template not found"})
@@ -124,24 +120,17 @@
   (log/info "clerk-webhook: Request method:" (:request-method request))
   (let [raw-body (:raw-body request)
         headers (:headers request)
-        body (:body request)
-        from-netlify? (boolean (get headers "x-nf-netlify-proxy"))]
+        body (:body request)]
     (log/info "clerk-webhook: Raw body available:" (boolean raw-body))
     (log/info "clerk-webhook: Raw body length:" (when raw-body (count raw-body)))
-    (log/info "clerk-webhook: From Netlify proxy:" from-netlify?)
     (log/info "clerk-webhook: Headers:" (select-keys headers ["svix-id" "svix-timestamp" "svix-signature" "content-type"]))
 
-    ;; Skip signature verification if coming from Netlify proxy (body gets modified)
-    (let [signature-valid? (if from-netlify?
-                             (do
-                               (log/warn "clerk-webhook: Skipping signature verification (Netlify proxy detected)")
-                               true)
-                             (clerk/verify-webhook-signature raw-body headers))]
+    (let [signature-valid? (clerk/verify-webhook-signature raw-body headers)]
       (log/info "clerk-webhook: Signature verification result:" signature-valid?)
 
       (if signature-valid?
         (do
-          (log/info "clerk-webhook: Signature verified successfully (or skipped)")
+          (log/info "clerk-webhook: Signature verified successfully")
           ;; Only log event details AFTER signature verification passes
           (log/info "clerk-webhook: === WEBHOOK PAYLOAD ===")
           (log/info "clerk-webhook: Event type:" (:type body))
@@ -176,8 +165,8 @@
 
 (defn serve-file [request]
   (let [filename (get-in request [:path-params :file-id])]
-    ;; Rate limit: 1 second for debugging
-    (if-let [rate-limit-response (throttle/check-rate-limit request 1000 1000 filename)]
+    (if-let [rate-limit-response (when (not= filename "countries.csv")
+                                   (throttle/check-rate-limit request 1000 3000 filename))]
       rate-limit-response
       (let [file-path (str "resources/files/" filename)]
         (if (.exists (jio/file file-path))
@@ -190,6 +179,19 @@
 
 (def allowed-file-extensions #{"txt" "csv" "tsv" "xls" "xlsx" "xlsm"})
 (def max-file-size (* 10 1024 1024)) ; 10MB in bytes
+
+(defn- read-limited-stream
+  "Reads input-stream up to max-bytes. Returns byte array on success, nil if limit exceeded."
+  [input-stream max-bytes]
+  (let [chunk (byte-array 8192)
+        out   (java.io.ByteArrayOutputStream.)]
+    (loop [total 0]
+      (let [n (.read input-stream chunk)]
+        (cond
+          (= n -1)                    (.toByteArray out)
+          (> (+ total n) max-bytes)   nil
+          :else                       (do (.write out chunk 0 n)
+                                          (recur (+ total n))))))))
 
 (defn get-file-extension-from-url [url]
   (when url
@@ -208,7 +210,7 @@
         (-> (response {:error "URL parameter is required"})
             (status 400))
         ;; Rate limit: 1 second for debugging
-        (if-let [rate-limit-response (throttle/check-rate-limit request 1000 1000 url-string)]
+        (if-let [rate-limit-response (throttle/check-rate-limit request 1000 3000 url-string)]
           rate-limit-response
           (try
             ;; First, check file extension from URL
@@ -218,23 +220,19 @@
               (if-not (allowed-file-extensions file-extension)
                 (-> (response {:error (str "File type not allowed. Allowed types: " (clojure.string/join ", " allowed-file-extensions))})
                     (status 400))
-                ;; Make HEAD request to check Content-Length
                 (let [connection (doto (.openConnection url)
-                                   (.setRequestMethod "HEAD")
                                    (.setConnectTimeout 5000)
-                                   (.setReadTimeout 5000)
+                                   (.setReadTimeout 30000)
                                    (.connect))
-                      content-length (.getContentLengthLong connection)]
-
-                  (if (and (pos? content-length) (> content-length max-file-size))
-                    (-> (response {:error (str "File too large. Maximum size is 10MB, file is " (/ content-length 1024 1024) "MB")})
+                      input-stream (.getInputStream connection)
+                      bytes        (read-limited-stream input-stream max-file-size)
+                      filename     (or (last (clojure.string/split url-string #"/")) "download")]
+                  (if (nil? bytes)
+                    (-> (response {:error "File too large. Maximum size is 10MB"})
                         (status 400))
-                    ;; Download and stream the file
-                    (let [input-stream (.getInputStream (.openConnection url))
-                          filename (or (last (clojure.string/split url-string #"/")) "download")]
-                      (-> (response input-stream)
-                          (assoc-in [:headers "Content-Type"] (get-content-type file-extension))
-                          (assoc-in [:headers "Content-Disposition"] (str "attachment; filename=\"" filename "\""))))))))
+                    (-> (response bytes)
+                        (assoc-in [:headers "Content-Type"] (get-content-type file-extension))
+                        (assoc-in [:headers "Content-Disposition"] (str "attachment; filename=\"" filename "\"")))))))
             (catch java.net.URISyntaxException e
               (log/error "Invalid URL syntax:" e)
               (-> (response {:error "Invalid URL"})

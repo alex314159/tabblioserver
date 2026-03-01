@@ -3,7 +3,8 @@
             [clojure.string :as str]
             [cheshire.core :as json]
             [tabblioserver.sql :as sql]
-            [tabblioserver.env :refer [env]])
+            [tabblioserver.env :refer [env]]
+            [tabblioserver.telegram :as telegram])
   (:import [com.clerk.backend_api Clerk]
            [com.clerk.backend_api.helpers.security AuthenticateRequest]
            [com.clerk.backend_api.helpers.security.models AuthenticateRequestOptions]
@@ -53,8 +54,8 @@
           (log/info "clerk-auth: Building authentication options with origin:" origin)
           (let [options-builder (AuthenticateRequestOptions/secretKey clerk-secret-key)
                 options-with-party (if origin
-                                    (.authorizedParty options-builder origin)
-                                    options-builder)
+                                     (.authorizedParty options-builder origin)
+                                     options-builder)
                 options (.build options-with-party)]
             (log/info "clerk-auth: Options built, calling authenticateRequest...")
             (let [request-state (AuthenticateRequest/authenticateRequest headers-map options)]
@@ -122,7 +123,7 @@
         (do
           (log/info "webhook-verify: All required headers present, decoding secret...")
           (let [webhook-secret-bytes (.decode (Base64/getDecoder)
-                                             (str/replace clerk-webhook-secret #"^whsec_" ""))]
+                                              (str/replace clerk-webhook-secret #"^whsec_" ""))]
             (log/info "webhook-verify: Secret decoded successfully")
             ;; Validate timestamp (within 5 minutes)
             (let [current-time (quot (System/currentTimeMillis) 1000)
@@ -140,8 +141,8 @@
                   (let [expected-signature (hmac-sha256 webhook-secret-bytes signed-payload)]
                     (log/info "webhook-verify: Expected signature computed:" expected-signature)
                     (let [signatures (-> svix-signature
-                                       (str/split #",")
-                                       (->> (map #(str/trim (str/replace % #"^v1=" "")))))]
+                                         (str/split #",")
+                                         (->> (map #(str/trim (str/replace % #"^v1=" "")))))]
                       (log/info "webhook-verify: Provided signatures:" signatures)
                       (let [expected-sig-trimmed (str/trim expected-signature)
                             match? (some #(= expected-sig-trimmed %) signatures)]
@@ -169,6 +170,7 @@
         (let [result (sql/create-user user-id)]
           (log/info "handle-event: User created successfully, result:" result)
           (log/info "=== HANDLE WEBHOOK EVENT END (USER CREATED) ===")
+          (telegram/notify-user-created user-id)
           {:status "success" :message "User created"}))
 
       :session.created
@@ -180,6 +182,7 @@
         (let [result (sql/update-user-login actual-user-id)]
           (log/info "handle-event: Login recorded successfully, result:" result)
           (log/info "=== HANDLE WEBHOOK EVENT END (SESSION CREATED) ===")
+          (telegram/notify-user-login actual-user-id)
           {:status "success" :message "Login recorded"}))
 
       :user.deleted

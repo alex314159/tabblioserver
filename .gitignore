@@ -20,5 +20,10 @@ CLAUDE.md
 PROJECT_ANALYSIS.md
 TODO.md
 
+# Database files
+*.duckdb
+*.duckdb.wal
+tabblio.db
+
 # macOS
 .DS_Store
