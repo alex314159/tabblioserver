@@ -65,7 +65,7 @@ tabblioserver is a Clojure REST API that handles:
 - **HTTP Server**: http-kit 2.8.1
 - **Routing**: Reitit 0.10.0
 - **Database**: SQLite 3.51.2.0
-- **Authentication**: Clerk Backend API 3.2.0
+- **Authentication**: Clerk Backend API 4.1.3
 
 ## Quick Start
 
