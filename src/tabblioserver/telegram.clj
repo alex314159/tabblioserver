@@ -31,3 +31,6 @@
 
 (defn notify-template-loaded [template-id user-id]
   (notify (str "Template loaded: " template-id " by " (or user-id "anonymous"))))
+
+(defn notify-server-restarted [port]
+  (notify (str "WARNING: tabblio server was unresponsive on port " port " and has been restarted")))
