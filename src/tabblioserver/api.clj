@@ -9,6 +9,7 @@
             [tabblioserver.clerk :as clerk]
             [tabblioserver.throttling :as throttle]
             [tabblioserver.telegram :as telegram]
+            [tabblioserver.ai :as ai]
             [clojure.tools.logging :as log]
             [clojure.java.io :as jio]
             [cheshire.core]))
@@ -286,6 +287,8 @@
    ["/api/unlink-template" {:post {:handler (with-clerk-auth unlink-template)}}]
    ["/api/user-templates" {:get {:handler (with-clerk-auth user-templates)}}]
    ["/api/serve-url" {:get {:handler (with-clerk-auth serve-url)}}]
+   ;; AI text-to-SQL proxy with per-user daily quota
+   ["/api/ai-query" {:post {:handler (with-clerk-auth ai/ai-query)}}]
    ;; Webhook routes (use signature verification, not session auth)
    ["/api/clerk-webhook" {:post {:handler clerk-webhook}}]])
 
@@ -302,7 +305,7 @@
                                                              #"https://tabblio\.com"
                                                              #"http://localhost:.*"]
                              :access-control-allow-methods [:get :put :post :delete :options]
-                             :access-control-allow-headers ["Content-Type" "Authorization" "Accept" "x-clerk-session-token"]
+                             :access-control-allow-headers ["Content-Type" "Authorization" "Accept" "x-clerk-session-token" "x-user-ai-key" "x-ai-provider"]
                              :access-control-allow-credentials true)
                  wrap-raw-body
                  wrap-params
