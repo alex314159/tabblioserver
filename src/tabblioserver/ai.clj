@@ -4,15 +4,16 @@
             [clojure.string :as str]
             [tabblioserver.env :refer [env]]
             [ring.util.response :refer [response status]]
-            [clojure.tools.logging :as log]))
+            [clojure.tools.logging :as log])
+  (:import (java.time LocalDate)))
 
-(def ^:private daily-limit 5)
+(def ^:private daily-limit 20)
 
 ;; {userId -> {:date "YYYY-MM-DD" :count N}}
 (def ^:private quota-state (atom {}))
 
 (defn- today []
-  (str (java.time.LocalDate/now)))
+  (str (LocalDate/now)))
 
 (defn- get-quota [user-id]
   (let [entry (get @quota-state user-id)
@@ -112,7 +113,7 @@ Return ONLY the SQL, no markdown, no explanation.")
       (let [quota (get-quota user-id)
             quota-exceeded? (and (not using-user-key) (>= (:used quota) daily-limit))]
         (if quota-exceeded?
-          (-> (response {:error "Daily query limit reached (5/day). Provide your own API key to continue."
+          (-> (response {:error "Daily query limit reached (15/day). Provide your own API key to continue."
                          :quota quota})
               (status 429))
           (let [api-key (if using-user-key

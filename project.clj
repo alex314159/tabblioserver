@@ -32,4 +32,5 @@
                  ;Authentication
                  [com.clerk/backend-api "4.1.3"]]
   :plugins []
+  :jvm-opts ["-Xmx512m" "-Xms128m"]
   :repl-options {:init-ns tabblioserver.core})
